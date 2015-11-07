@@ -4,16 +4,14 @@ import akka.actor.{ActorLogging, ActorRef, Actor, Props}
 import akka.event.LoggingReceive
 import me.figo.FigoException
 import me.figo.internal.TokenResponse
-import me.figo.models.User
 import play.Logger
 import scala.concurrent.Future
-import play.api.libs.json.Json.JsValueWrapper
 import play.api.libs.json._
 import play.api.libs.json.Reads._
 import play.api.libs.functional.syntax._
 import scala.concurrent.ExecutionContext.Implicits.global
 import play.api.Play.current
-import api.{FigoApi, FigoUser}
+import api.{FigoApi, FigoUser, FigoUserAdress}
 
 /**
   * Event
@@ -34,12 +32,34 @@ case class Event(name: String,
   */
 class EventHandler {
 
+  implicit lazy val userFigoUserAdressWrites: Writes[FigoUserAdress] = (
+    (JsPath \ "country").writeNullable[String] and
+      (JsPath \ "city").writeNullable[String] and
+      (JsPath \ "street").writeNullable[String] and
+      (JsPath \ "vat").writeNullable[String] and
+      (JsPath \ "bill").writeNullable[String] and
+      (JsPath \ "company").writeNullable[String] and
+      (JsPath \ "street2").writeNullable[String]
+    ) (unlift(FigoUserAdress.unapply))
+
+  implicit lazy val userFigoUserAdressReads: Reads[FigoUserAdress] = (
+    (JsPath \ "country").readNullable[String] and
+      (JsPath \ "city").readNullable[String] and
+      (JsPath \ "street").readNullable[String] and
+      (JsPath \ "vat").readNullable[String] and
+      (JsPath \ "bill").readNullable[String] and
+      (JsPath \ "company").readNullable[String] and
+      (JsPath \ "street2").readNullable[String]
+    ) (FigoUserAdress.apply _)
+
+
+
   implicit lazy val userFigoWrites: Writes[FigoUser] = (
     (JsPath \ "access_token").writeNullable[String] and
       (JsPath \ "name").writeNullable[String] and
       (JsPath \ "username").writeNullable[String] and
       (JsPath \ "email").writeNullable[String] and
-      (JsPath \ "address").writeNullable[String] and
+      (JsPath \ "address").writeNullable[FigoUserAdress] and
       (JsPath \ "password").writeNullable[String]
     ) (unlift(FigoUser.unapply))
 
@@ -49,7 +69,7 @@ class EventHandler {
       (JsPath \ "name").readNullable[String] and
       (JsPath \ "username").readNullable[String] and
       (JsPath \ "email").readNullable[String] and
-      (JsPath \ "address").readNullable[String] and
+      (JsPath \ "address").readNullable[FigoUserAdress] and
       (JsPath \ "password").readNullable[String]
     ) (FigoUser.apply _)
 
@@ -138,27 +158,9 @@ class EventHandler {
           f onFailure {
             case m: FigoException => {
               println("Error on login {}", m)
-              event.out.get ! Json.obj(
-                "name" -> event.name,
-                "id" -> event.id,
-                "data" -> Json.obj(
-                  "message" -> "Wrong username or password!",
-                  "code" -> m.getErrorCode(),
-                  "error" -> true
-                )
-              )
+              sendGeneralError(event,  "Wrong username or password!")
             }
-            case t => {
-              println("Error on login {}", t)
-              event.out.get ! Json.obj(
-                "name" -> event.name,
-                "id" -> event.id,
-                "data" -> Json.obj(
-                  "message" -> "Wrong username or password!",
-                  "error" -> true
-                )
-              )
-            }
+            case t => sendGeneralError(event,  "Wrong username or password!")
           }
         }
         case "createUser" => {
@@ -190,27 +192,13 @@ class EventHandler {
           f onFailure {
             case m: FigoException => {
               Logger.info("Error on createUser {} {} {} {}", m.getCause(), m.getMessage(), m.getStackTrace().toString(), m.getErrorCode())
-              event.out.get ! Json.obj(
-                "name" -> event.name,
-                "id" -> event.id,
-                "data" -> Json.obj(
-                  "message" -> "User with this username or email is registered!",
-                  "code" -> m.getErrorCode(),
-                  "error" -> true
-                )
-              )
+              sendGeneralError(event, Json.obj(
+                "message" -> "User with this username or email is registered!",
+                "code" -> m.getErrorCode(),
+                "error" -> true
+              ).toString())
             }
-            case t => {
-              Logger.info("Error on createUser {}", t)
-              event.out.get ! Json.obj(
-                "name" -> event.name,
-                "id" -> event.id,
-                "data" -> Json.obj(
-                  "message" -> "User with this username or email is registered!",
-                  "error" -> true
-                )
-              )
-            }
+            case t => sendGeneralError(event, "User with this username or email is registered!")
           }
         }
 
@@ -243,48 +231,22 @@ class EventHandler {
           f onFailure {
             case m: FigoException => {
               Logger.info("Error on updateUser {} {} {} {}", m.getCause(), m.getMessage(), m.getStackTrace().toString(), m.getErrorCode())
-              event.out.get ! Json.obj(
-                "name" -> event.name,
-                "id" -> event.id,
-                "data" -> Json.obj(
-                  "message" -> "User is not updated!",
-                  "code" -> m.getErrorCode(),
-                  "error" -> true
-                )
-              )
+              sendGeneralError(event, "User is not updated!")
             }
-            case t => {
-              Logger.info("Error on updateUser {}", t)
-              event.out.get ! Json.obj(
-                "name" -> event.name,
-                "id" -> event.id,
-                "data" -> Json.obj(
-                  "message" -> "User is not updated!",
-                  "error" -> true
-                )
-              )
-            }
+            case t => sendGeneralError(event, "User is not updated!")
           }
         }
 
 
         case "getUser" => {
-          val f: Future[User] = Future {
+          val f: Future[FigoUser] = Future {
             Logger.info("updateUser params {}", event.params)
             val user: FigoUser = event.params.as[FigoUser]
             Logger.info("updateUser user {}", user)
             FigoApi.getUser(user)
           }
           f onSuccess {
-            case u => {
-              var user : FigoUser = new FigoUser(
-                event.params.as[FigoUser].access_token,
-                Some(u.getName()),
-                Some(null),
-                Some(null),
-                Some(u.getAddress().toString()),
-                Some(null)
-              )
+            case user => {
               Logger.info("TokenResponse getUser {}", Json.toJson(user))
               event.out.get ! Json.obj(
                 "name" -> event.name,
@@ -296,32 +258,57 @@ class EventHandler {
           }
           f onFailure {
             case m: FigoException => {
-              Logger.info("Error on getUser FigoException {} {} {} {}",  m.getMessage(), m.getStackTrace().toString(), m.getErrorCode())
-              event.out.get ! Json.obj(
-                "name" -> event.name,
-                "id" -> event.id,
-                "data" -> Json.obj(
-                  "message" -> "User don't exist",
-                  "code" -> m.getErrorCode(),
-                  "error" -> true
-                )
-              )
+              Logger.info("Error on getUser FigoException {} {} {} {}", m.getMessage(), m.getStackTrace().toString(), m.getErrorCode())
+              sendGeneralError(event, "User don't exist")
             }
-            case t => {
-              Logger.info("Error on getUser {}", t)
+            case t => sendGeneralError(event, "User don't exist " + t.getMessage())
+          }
+        }
+      /*
+        case "getAccounts" => {
+          val f: Future[FigoUser] = Future {
+            Logger.info("updateUser params {}", event.params)
+            val user: FigoUser = event.params.as[FigoUser]
+            Logger.info("updateUser user {}", user)
+            FigoApi.getAccounts(user)
+          }
+          f onSuccess {
+            case user => {
+              Logger.info("TokenResponse getUser {}", Json.toJson(user))
               event.out.get ! Json.obj(
                 "name" -> event.name,
                 "id" -> event.id,
-                "data" -> Json.obj(
-                  "message" -> "User don't exist",
-                  "error" -> true
-                )
+                "data" -> Json.toJson(user)
               )
             }
           }
+          f onFailure {
+            case m: FigoException => {
+              Logger.info("Error on getUser FigoException {} {} {} {}", m.getMessage(), m.getStackTrace().toString(), m.getErrorCode())
+              sendGeneralError(event, "User don't exist")
+            }
+            case t => sendGeneralError(event, "User don't exist")
+          }
         }
 
+      */
       }
+    }
+    /**
+      * Send general error
+      * @param event
+      * @param message
+      */
+    def sendGeneralError(event: Event, message: String): Unit = {
+      Logger.info("Error on  {}", message)
+      event.out.get ! Json.obj(
+        "name" -> event.name,
+        "id" -> event.id,
+        "data" -> Json.obj(
+          "message" -> message,
+          "error" -> true
+        )
+      )
     }
   }
 
