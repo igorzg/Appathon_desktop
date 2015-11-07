@@ -4,6 +4,7 @@ import akka.actor.{ActorLogging, ActorRef, Actor, Props}
 import akka.event.LoggingReceive
 import me.figo.FigoException
 import me.figo.internal.TokenResponse
+import me.figo.models.User
 import play.Logger
 import scala.concurrent.Future
 import play.api.libs.json.Json.JsValueWrapper
@@ -12,7 +13,6 @@ import play.api.libs.json.Reads._
 import play.api.libs.functional.syntax._
 import scala.concurrent.ExecutionContext.Implicits.global
 import play.api.Play.current
-import models.{User, UserDAO}
 import api.{FigoApi, FigoUser}
 
 /**
@@ -33,63 +33,30 @@ case class Event(name: String,
   * Event handler
   */
 class EventHandler {
-  /**
-    * Lazy reads for recursive package
-    */
-  implicit lazy val userReads: Reads[User] = (
-    (JsPath \ "user_id").readNullable[Int] and
-      (JsPath \ "name").read[String] and
-      (JsPath \ "session_id").readNullable[String]
-    ) (User.apply _)
-  /**
-    * Lazy write for recursive package config
-    */
-  implicit lazy val userWrites: Writes[User] = (
-    (JsPath \ "name").writeNullable[Int] and
-      (JsPath \ "name").write[String] and
-      (JsPath \ "session_id").writeNullable[String]
-    ) (unlift(User.unapply))
+
+  implicit lazy val userFigoWrites: Writes[FigoUser] = (
+    (JsPath \ "access_token").writeNullable[String] and
+      (JsPath \ "name").writeNullable[String] and
+      (JsPath \ "username").writeNullable[String] and
+      (JsPath \ "email").writeNullable[String] and
+      (JsPath \ "address").writeNullable[String] and
+      (JsPath \ "password").writeNullable[String]
+    ) (unlift(FigoUser.unapply))
 
 
-  val userDAO: UserDAO = new UserDAO
-
-
-  implicit lazy val userFigoWrites: Reads[FigoUser] = (
-    (JsPath \ "username").readNullable[String] and
-      (JsPath \ "password").readNullable[String] and
-      (JsPath \ "email").readNullable[String] and
+  implicit lazy val userFigoReads: Reads[FigoUser] = (
+    (JsPath \ "access_token").readNullable[String] and
       (JsPath \ "name").readNullable[String] and
+      (JsPath \ "username").readNullable[String] and
+      (JsPath \ "email").readNullable[String] and
       (JsPath \ "address").readNullable[String] and
-      (JsPath \ "token").readNullable[String]
+      (JsPath \ "password").readNullable[String]
     ) (FigoUser.apply _)
 
   /**
     * Events list
     */
   var events: Array[Event] = Array()
-
-
-  /**
-    * Resolve user
-    * @param out actor reference
-    * @param event client event
-    * @param user user record
-    * @return
-    */
-  def resolveUser(out: ActorRef, event: Event)(user: Option[User]) = {
-    var name: String = null
-    if (user.isDefined) {
-      name = user.get.name
-    }
-    out ! Json.obj(
-      "name" -> event.name,
-      "id" -> event.id,
-      "data" -> Json.obj(
-        "isLoggedIn" -> user.isDefined,
-        "name" -> name
-      )
-    )
-  }
 
 
   /**
@@ -302,34 +269,34 @@ class EventHandler {
 
 
         case "getUser" => {
-          val f: Future[TokenResponse] = Future {
+          val f: Future[User] = Future {
             Logger.info("updateUser params {}", event.params)
             val user: FigoUser = event.params.as[FigoUser]
             Logger.info("updateUser user {}", user)
             FigoApi.getUser(user)
           }
           f onSuccess {
-            case v: TokenResponse => {
-              Logger.info("TokenResponse getUser {}", Json.obj(
-                "token" -> v.getAccessToken(),
-                "expires" -> v.getExpiresIn().toString(),
-                "refresh" -> v.getRefreshToken()
-              ))
+            case u => {
+              var user : FigoUser = new FigoUser(
+                event.params.as[FigoUser].access_token,
+                Some(u.getName()),
+                Some(null),
+                Some(null),
+                Some(u.getAddress().toString()),
+                Some(null)
+              )
+              Logger.info("TokenResponse getUser {}", Json.toJson(user))
               event.out.get ! Json.obj(
                 "name" -> event.name,
                 "id" -> event.id,
-                "data" -> Json.obj(
-                  "token" -> v.getAccessToken(),
-                  "expires" -> v.getExpiresIn().toString(),
-                  "refresh" -> v.getRefreshToken()
-                )
+                "data" -> Json.toJson(user)
               )
             }
 
           }
           f onFailure {
             case m: FigoException => {
-              Logger.info("Error on getUser {} {} {} {}", m.getCause(), m.getMessage(), m.getStackTrace().toString(), m.getErrorCode())
+              Logger.info("Error on getUser FigoException {} {} {} {}",  m.getMessage(), m.getStackTrace().toString(), m.getErrorCode())
               event.out.get ! Json.obj(
                 "name" -> event.name,
                 "id" -> event.id,
