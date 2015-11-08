@@ -386,13 +386,7 @@ class EventHandler {
           f onSuccess {
             case data => {
               Logger.info("link account {}", data.toString())
-              event.out.get ! Json.obj(
-                "name" -> event.name,
-                "id" -> event.id,
-                "data" -> Json.obj(
-                  "message" -> data.getMessage()
-                )
-              )
+              broadcastWithSession("getAccounts", event.session_id)
             }
           }
           f onFailure {

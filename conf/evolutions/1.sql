@@ -2,10 +2,10 @@
 
 # --- !Ups
 
-CREATE TABLE "User" (
-    "user_id" int(10) NOT NULL AUTO_INCREMENT,
-    "name" varchar(255) NOT NULL,
-    "session_id" VARCHAR (255) UNIQUE NOT NULL,
+CREATE TABLE "Codes" (
+    "code_id" int(10) NOT NULL AUTO_INCREMENT,
+    "code" VARCHAR (255) NOT NULL,
+    "cash" DOUBLE (255) UNIQUE NOT NULL,
     PRIMARY KEY ("user_id")
 );
 
