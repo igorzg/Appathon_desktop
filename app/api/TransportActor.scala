@@ -1,5 +1,8 @@
 package api
 
+import java.util
+import java.util.Date
+
 import akka.actor.{ActorLogging, ActorRef, Actor, Props}
 import akka.event.LoggingReceive
 import me.figo.FigoException
@@ -11,7 +14,7 @@ import play.api.libs.json.Reads._
 import play.api.libs.functional.syntax._
 import scala.concurrent.ExecutionContext.Implicits.global
 import play.api.Play.current
-import api.{FigoApi, FigoUser, FigoUserAdress}
+import api.{FigoApi, FigoUser, FigoUserAdress, FigoAccount, FigoPaymentType, FigoAccountBalance}
 
 /**
   * Event
@@ -53,7 +56,6 @@ class EventHandler {
     ) (FigoUserAdress.apply _)
 
 
-
   implicit lazy val userFigoWrites: Writes[FigoUser] = (
     (JsPath \ "access_token").writeNullable[String] and
       (JsPath \ "name").writeNullable[String] and
@@ -73,6 +75,77 @@ class EventHandler {
       (JsPath \ "password").readNullable[String]
     ) (FigoUser.apply _)
 
+  implicit lazy val paymentTypeReads: Reads[FigoPaymentType] =  (
+    (JsPath \ "allowed_recipients").read[Set[String]] and
+      (JsPath \ "max_purpose_length").read[Int] and
+      (JsPath \ "supported_text_keys").read[Set[String]] and
+      (JsPath \ "min_scheduled_date").read[Date] and
+      (JsPath \ "max_scheduled_date").read[Date] and
+        (JsPath \ "supported_file_formats").read[Set[String]]
+    ) (FigoPaymentType.apply _)
+
+  implicit lazy val paymentTypeWrites: Writes[FigoPaymentType] =  (
+    (JsPath \ "allowed_recipients").write[Set[String]] and
+      (JsPath \ "max_purpose_length").write[Int] and
+      (JsPath \ "supported_text_keys").write[Set[String]] and
+      (JsPath \ "min_scheduled_date").write[Date] and
+      (JsPath \ "max_scheduled_date").write[Date] and
+      (JsPath \ "supported_file_formats").write[Set[String]]
+    ) (unlift(FigoPaymentType.unapply))
+
+
+  implicit lazy val accountBalanceReads: Reads[FigoAccountBalance] =  (
+    (JsPath \ "balance").read[BigDecimal] and
+      (JsPath \ "balance_date").read[Date] and
+      (JsPath \ "credit_line").read[BigDecimal] and
+      (JsPath \ "monthly_spending_limit").read[BigDecimal]
+    ) (FigoAccountBalance.apply _)
+
+  implicit lazy val accountBalanceWrites: Writes[FigoAccountBalance] =  (
+    (JsPath \ "balance").write[BigDecimal] and
+      (JsPath \ "balance_date").write[Date] and
+      (JsPath \ "credit_line").write[BigDecimal] and
+      (JsPath \ "monthly_spending_limit").write[BigDecimal]
+    ) (unlift(FigoAccountBalance.unapply))
+
+  implicit lazy val accountFigoReads: Reads[FigoAccount] =  (
+    (JsPath \ "account_id").read[String] and
+      (JsPath \ "bank_id").read[String] and
+      (JsPath \ "name").read[String] and
+      (JsPath \ "owner").read[String] and
+      (JsPath \ "auto_sync").read[Boolean] and
+      (JsPath \ "account_number").read[String] and
+      (JsPath \ "bank_code").read[String] and
+      (JsPath \ "bank_name").read[String] and
+      (JsPath \ "currency").read[String] and
+      (JsPath \ "iban").read[String] and
+      (JsPath \ "bic").read[String] and
+      (JsPath \ "account_type").read[String] and
+      (JsPath \ "icon").read[String] and
+      (JsPath \ "balance").read[FigoAccountBalance] and
+      (JsPath \ "additional_icons").read[Map[String, String]] and
+      (JsPath \ "supported_payments").read[Map[String, FigoPaymentType]]
+    ) (FigoAccount.apply _)
+
+
+  implicit lazy val accountFigoWrites: Writes[FigoAccount] =  (
+    (JsPath \ "account_id").write[String] and
+      (JsPath \ "bank_id").write[String] and
+      (JsPath \ "name").write[String] and
+      (JsPath \ "owner").write[String] and
+      (JsPath \ "auto_sync").write[Boolean] and
+      (JsPath \ "account_number").write[String] and
+      (JsPath \ "bank_code").write[String] and
+      (JsPath \ "bank_name").write[String] and
+      (JsPath \ "currency").write[String] and
+      (JsPath \ "iban").write[String] and
+      (JsPath \ "bic").write[String] and
+      (JsPath \ "account_type").write[String] and
+      (JsPath \ "icon").write[String] and
+      (JsPath \ "balance").write[FigoAccountBalance] and
+      (JsPath \ "additional_icons").write[Map[String, String]] and
+      (JsPath \ "supported_payments").write[Map[String, FigoPaymentType]]
+    ) (unlift(FigoAccount.unapply))
   /**
     * Events list
     */
@@ -111,7 +184,6 @@ class EventHandler {
       )
     )
   }
-
 
 
   /**
@@ -172,9 +244,9 @@ class EventHandler {
           f onFailure {
             case m: FigoException => {
               println("Error on login {}", m)
-              sendGeneralError(event,  "Wrong username or password!")
+              sendGeneralError(event, "Wrong username or password!")
             }
-            case t => sendGeneralError(event,  "Wrong username or password!")
+            case t => sendGeneralError(event, "Wrong username or password!")
           }
         }
         case "createUser" => {
@@ -262,34 +334,32 @@ class EventHandler {
             case t => sendGeneralError(event, "User don't exist " + t.getMessage())
           }
         }
-      /*
+
         case "getAccounts" => {
-          val f: Future[FigoUser] = Future {
+          val f: Future[Set[FigoAccount]] = Future {
             Logger.info("updateUser params {}", event.params)
             val user: FigoUser = event.params.as[FigoUser]
             Logger.info("updateUser user {}", user)
             FigoApi.getAccounts(user)
           }
           f onSuccess {
-            case user => {
-              Logger.info("TokenResponse getUser {}", Json.toJson(user))
+            case data => {
+              Logger.info("getAcctounts {}", Json.toJson(data))
               event.out.get ! Json.obj(
                 "name" -> event.name,
                 "id" -> event.id,
-                "data" -> Json.toJson(user)
+                "data" -> Json.toJson(data)
               )
             }
           }
           f onFailure {
             case m: FigoException => {
               Logger.info("Error on getUser FigoException {} {} {} {}", m.getMessage(), m.getStackTrace().toString(), m.getErrorCode())
-              sendGeneralError(event, "User don't exist")
+              sendGeneralError(event, "Error while fetching account data")
             }
-            case t => sendGeneralError(event, "User don't exist")
+            case t => sendGeneralError(event, "Error while fetching account data")
           }
         }
-
-      */
       }
     }
     /**
