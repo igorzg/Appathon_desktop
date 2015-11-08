@@ -6,7 +6,7 @@ import java.util.Date
 import akka.actor.{ActorLogging, ActorRef, Actor, Props}
 import akka.event.LoggingReceive
 import me.figo.FigoException
-import me.figo.internal.TokenResponse
+import me.figo.internal.{TaskStatusResponse, TaskTokenResponse, TokenResponse}
 import play.Logger
 import scala.concurrent.Future
 import play.api.libs.json._
@@ -91,21 +91,21 @@ class EventHandler {
     ) (FigoUser.apply _)
 
   implicit lazy val paymentTypeReads: Reads[FigoPaymentType] = (
-    (JsPath \ "allowed_recipients").read[Set[String]] and
-      (JsPath \ "max_purpose_length").read[Int] and
-      (JsPath \ "supported_text_keys").read[Set[String]] and
-      (JsPath \ "min_scheduled_date").read[Date] and
-      (JsPath \ "max_scheduled_date").read[Date] and
-      (JsPath \ "supported_file_formats").read[Set[String]]
+    (JsPath \ "allowed_recipients").readNullable[Set[String]] and
+      (JsPath \ "max_purpose_length").readNullable[Int] and
+      (JsPath \ "supported_text_keys").readNullable[Set[String]] and
+      (JsPath \ "min_scheduled_date").readNullable[Date] and
+      (JsPath \ "max_scheduled_date").readNullable[Date] and
+      (JsPath \ "supported_file_formats").readNullable[Set[String]]
     ) (FigoPaymentType.apply _)
 
   implicit lazy val paymentTypeWrites: Writes[FigoPaymentType] = (
-    (JsPath \ "allowed_recipients").write[Set[String]] and
-      (JsPath \ "max_purpose_length").write[Int] and
-      (JsPath \ "supported_text_keys").write[Set[String]] and
-      (JsPath \ "min_scheduled_date").write[Date] and
-      (JsPath \ "max_scheduled_date").write[Date] and
-      (JsPath \ "supported_file_formats").write[Set[String]]
+    (JsPath \ "allowed_recipients").writeNullable[Set[String]] and
+      (JsPath \ "max_purpose_length").writeNullable[Int] and
+      (JsPath \ "supported_text_keys").writeNullable[Set[String]] and
+      (JsPath \ "min_scheduled_date").writeNullable[Date] and
+      (JsPath \ "max_scheduled_date").writeNullable[Date] and
+      (JsPath \ "supported_file_formats").writeNullable[Set[String]]
     ) (unlift(FigoPaymentType.unapply))
 
 
@@ -138,7 +138,7 @@ class EventHandler {
       (JsPath \ "account_type").read[String] and
       (JsPath \ "icon").read[String] and
       (JsPath \ "balance").read[FigoAccountBalance] and
-      (JsPath \ "additional_icons").read[Map[String, String]] and
+      (JsPath \ "additional_icons").read[Map[String, String]]  and
       (JsPath \ "supported_payments").read[Map[String, FigoPaymentType]]
     ) (FigoAccount.apply _)
 
@@ -158,7 +158,7 @@ class EventHandler {
       (JsPath \ "account_type").write[String] and
       (JsPath \ "icon").write[String] and
       (JsPath \ "balance").write[FigoAccountBalance] and
-      (JsPath \ "additional_icons").write[Map[String, String]] and
+      (JsPath \ "additional_icons").write[Map[String, String]]  and
       (JsPath \ "supported_payments").write[Map[String, FigoPaymentType]]
     ) (unlift(FigoAccount.unapply))
   /**
@@ -268,7 +268,7 @@ class EventHandler {
           val f: Future[TokenResponse] = Future {
             Logger.info("createUser params {}", event.params)
             val user: FigoUser = event.params.as[FigoUser]
-            Logger.info("createUser user {}", user)
+            Logger.info("createUser {}", user)
             FigoApi.createUserAndLogin(user)
           }
           f onSuccess {
@@ -307,7 +307,7 @@ class EventHandler {
           val f: Future[FigoUser] = Future {
             Logger.info("updateUser params {}", event.params)
             val user: FigoUser = event.params.as[FigoUser]
-            Logger.info("updateUser user {}", user)
+            Logger.info("updateUser {}", user)
             FigoApi.updateUser(user)
           }
           f onSuccess {
@@ -325,9 +325,9 @@ class EventHandler {
 
         case "getUser" => {
           val f: Future[FigoUser] = Future {
-            Logger.info("updateUser params {}", event.params)
+            Logger.info("getUser params {}", event.params)
             val user: FigoUser = event.params.as[FigoUser]
-            Logger.info("updateUser user {}", user)
+            Logger.info("getUser {}", user)
             FigoApi.getUser(user)
           }
           f onSuccess {
@@ -352,14 +352,14 @@ class EventHandler {
 
         case "getAccounts" => {
           val f: Future[Set[FigoAccount]] = Future {
-            Logger.info("updateUser params {}", event.params)
+            Logger.info("getAccounts params {}", event.params)
             val user: FigoUser = event.params.as[FigoUser]
-            Logger.info("updateUser user {}", user)
+            Logger.info("getAccounts {}", user)
             FigoApi.getAccounts(user)
           }
           f onSuccess {
             case data => {
-              Logger.info("getAcctounts {}", Json.toJson(data))
+              Logger.info("getAcctounts result {}", data)
               event.out.get ! Json.obj(
                 "name" -> event.name,
                 "id" -> event.id,
@@ -377,23 +377,29 @@ class EventHandler {
         }
 
         case "linkBank" => {
-          val f: Future[FigoLinkBank] = Future {
-            Logger.info("updateUser params {}", event.params)
+          val f: Future[TaskStatusResponse] = Future {
+            Logger.info("linkBank params {}", event.params)
             val link: FigoLinkBank = event.params.as[FigoLinkBank]
-            Logger.info("updateUser user {}", link)
+            Logger.info("linkBank {}", link)
             FigoApi.linkAccount(link)
           }
           f onSuccess {
             case data => {
-              Logger.info("link account {}", Json.toJson(data))
+              Logger.info("link account {}", data.toString())
               event.out.get ! Json.obj(
                 "name" -> event.name,
                 "id" -> event.id,
-                "data" -> Json.toJson(data)
+                "data" -> Json.obj(
+                  "message" -> data.getMessage()
+                )
               )
             }
           }
           f onFailure {
+            case m : FigoException => {
+              Logger.info("Error on linking account {} {} {} {}", m.getMessage(), m.getLocalizedMessage(), m.getErrorCode(), m.getStackTrace())
+              sendGeneralError(event, "while linking bank account")
+            }
             case m => {
               Logger.info("Error on linking account {} {}", m.getMessage(), m.getStackTrace().toString())
               sendGeneralError(event, "while linking bank account")

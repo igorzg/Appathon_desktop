@@ -4,9 +4,8 @@ import java.net.{HttpURLConnection, URL}
 import java.util
 import java.util.Date
 
-import me.figo.FigoConnection
-import me.figo.FigoSession
-import me.figo.internal.TaskTokenResponse
+import me.figo.{FigoException, FigoConnection, FigoSession}
+import me.figo.internal.{TaskStatusResponse, TaskTokenResponse}
 import me.figo.models._
 import play.Configuration
 import play.api.libs.json.{JsPath, Writes, Json}
@@ -16,10 +15,11 @@ import scala.collection.JavaConverters._
 
 case class FigoLinkBank(
                          access_token: String,
-                       var bank_code: String,
-                       var country_code: String,
-                       var credentials: Seq[String]
+                         var bank_code: String,
+                         var country_code: String,
+                         var credentials: Seq[String]
                        )
+
 case class FigoUserAdress(
                            var country: Option[String],
                            var city: Option[String],
@@ -47,12 +47,12 @@ case class FigoAccountBalance(
                              )
 
 case class FigoPaymentType(
-                            var allowed_recipients: Set[String],
-                            var max_purpose_length: Int,
-                            var supported_text_keys: Set[String],
-                            var min_scheduled_date: Date,
-                            var max_scheduled_date: Date,
-                            var supported_file_formats: Set[String]
+                            var allowed_recipients: Option[Set[String]],
+                            var max_purpose_length: Option[Int],
+                            var supported_text_keys: Option[Set[String]],
+                            var min_scheduled_date: Option[Date],
+                            var max_scheduled_date: Option[Date],
+                            var supported_file_formats: Option[Set[String]]
                           )
 
 case class FigoAccount(
@@ -71,7 +71,6 @@ case class FigoAccount(
                         var icon: String,
                         var balance: FigoAccountBalance,
                         var additional_icons: Map[String, String],
-                        // var supported_tan_schemes: util.List[me.figo.models.TanScheme],
                         var supported_payments: Map[String, FigoPaymentType]
                       )
 
@@ -118,19 +117,23 @@ class MyFigoSession(token: String) extends FigoSession(token) {
 
   def mapFigoAccount(account: Account): FigoAccount = {
     val balance = account.getBalance()
+
     var supported_payments = Map[String, FigoPaymentType]()
     val payments = account.getSupportedPaymentTypes()
+    Logger.info("Payments {}", payments.keySet().toArray().toString())
     for ((k: String, payment: me.figo.models.PaymentType) <- JavaConversions.mapAsScalaMap(payments)) {
       val figoPayment: FigoPaymentType = new FigoPaymentType(
-        javaListToScalaSet[String](payment.getAllowedRecipients()),
-        payment.getMaxPurposeLength(),
-        javaListToScalaSet[String](payment.getSupportedTextKeys()),
-        payment.getMinScheduledDate(),
-        payment.getMaxScheduledDate(),
-        javaListToScalaSet[String](payment.getSupportedFileFormats())
+        Some(javaListToScalaSet[String](payment.getAllowedRecipients())),
+        Some(payment.getMaxPurposeLength()),
+        Some(javaListToScalaSet[String](payment.getSupportedTextKeys())),
+        Some(payment.getMinScheduledDate()),
+        Some(payment.getMaxScheduledDate()),
+        Some(javaListToScalaSet[String](payment.getSupportedFileFormats()))
       )
-      supported_payments = supported_payments ++ Map(k -> figoPayment)
+      supported_payments ++ Map(k -> figoPayment)
     }
+
+    Logger.info("supported_payments {}", supported_payments)
 
     new FigoAccount(
       account.getAccountId(),
@@ -153,20 +156,33 @@ class MyFigoSession(token: String) extends FigoSession(token) {
         balance.getMonthlySpendingLimit()
       ),
       JavaConversions.mapAsScalaMap(account.getAddtionalIcons()).toMap,
-      // account.getSupportedTanSchemes(),
       supported_payments
     )
   }
 
-  def linkAccount(bankLink: FigoLinkBank): FigoLinkBank = {
-    val result: TaskTokenResponse = this.setupNewAccount(
+  def linkAccount(bankLink: FigoLinkBank): TaskStatusResponse = {
+    val tokenResponse: TaskTokenResponse = this.setupNewAccount(
       bankLink.bank_code,
       bankLink.country_code,
       JavaConversions.seqAsJavaList(bankLink.credentials),
       JavaConversions.seqAsJavaList(Seq[String]())
     )
-    Logger.info("Link bank account {}", result)
-    bankLink
+    Logger.info("TaskToken {}", tokenResponse.getTaskToken())
+    var taskStatus: TaskStatusResponse = this.getTaskState(tokenResponse)
+
+    while (!taskStatus.isEnded() && !taskStatus.isErroneous() && !taskStatus.isWaitingForPin() && !taskStatus.isWaitingForResponse()) {
+      taskStatus = this.getTaskState(tokenResponse)
+      Thread.sleep(1000L)
+    }
+
+    if (taskStatus.isWaitingForPin() && !taskStatus.isEnded()) {
+      throw new FigoException("Waiting for a pin", taskStatus.getMessage());
+    } else if (taskStatus.isErroneous() && taskStatus.isEnded()) {
+      throw new FigoException("Figo Exception", taskStatus.getMessage());
+    } else {
+      Logger.info("TaskToken {}", taskStatus.getMessage())
+    }
+    taskStatus
   }
 
   def mapAccount(account: Account, figoAccount: FigoAccount): Account = {
