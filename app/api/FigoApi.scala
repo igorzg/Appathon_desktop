@@ -6,6 +6,7 @@ import java.util.Date
 
 import me.figo.FigoConnection
 import me.figo.FigoSession
+import me.figo.internal.TaskTokenResponse
 import me.figo.models._
 import play.Configuration
 import play.api.libs.json.{JsPath, Writes, Json}
@@ -13,6 +14,12 @@ import play.Logger
 import scala.collection.JavaConversions
 import scala.collection.JavaConverters._
 
+case class FigoLinkBank(
+                         access_token: String,
+                       var bank_code: String,
+                       var country_code: String,
+                       var credentials: Seq[String]
+                       )
 case class FigoUserAdress(
                            var country: Option[String],
                            var city: Option[String],
@@ -151,6 +158,17 @@ class MyFigoSession(token: String) extends FigoSession(token) {
     )
   }
 
+  def linkAccount(bankLink: FigoLinkBank): FigoLinkBank = {
+    val result: TaskTokenResponse = this.setupNewAccount(
+      bankLink.bank_code,
+      bankLink.country_code,
+      JavaConversions.seqAsJavaList(bankLink.credentials),
+      JavaConversions.seqAsJavaList(Seq[String]())
+    )
+    Logger.info("Link bank account {}", result)
+    bankLink
+  }
+
   def mapAccount(account: Account, figoAccount: FigoAccount): Account = {
     account.setName(figoAccount.name)
     account.setOwner(figoAccount.owner)
@@ -160,6 +178,7 @@ class MyFigoSession(token: String) extends FigoSession(token) {
   def getFigoAccounts(): Set[FigoAccount] = {
     var figoAccounts = Set[FigoAccount]()
     val accounts: Set[Account] = javaListToScalaSet[Account](this.getAccounts())
+    Logger.info("Accounts {}", accounts.toString())
     accounts.foreach {
       case item => {
         figoAccounts += mapFigoAccount(item)
@@ -219,4 +238,5 @@ object FigoApi {
 
   def updateUser(user: FigoUser) = connection.session(user.access_token.getOrElse(null)).updateUser(user)
 
+  def linkAccount(link: FigoLinkBank) = connection.session(link.access_token).linkAccount(link)
 }

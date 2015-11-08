@@ -35,6 +35,21 @@ case class Event(name: String,
   */
 class EventHandler {
 
+  implicit lazy val userBankLinkWrite: Writes[FigoLinkBank] = (
+    (JsPath \ "access_token").write[String] and
+      (JsPath \ "bank_code").write[String] and
+      (JsPath \ "country_code").write[String] and
+      (JsPath \ "credentials").write[Seq[String]]
+    ) (unlift(FigoLinkBank.unapply))
+
+  implicit lazy val userBankLinkRead: Reads[FigoLinkBank] = (
+    (JsPath \ "access_token").read[String] and
+      (JsPath \ "bank_code").read[String] and
+      (JsPath \ "country_code").read[String] and
+      (JsPath \ "credentials").read[Seq[String]]
+    ) (FigoLinkBank.apply _)
+
+
   implicit lazy val userFigoUserAdressWrites: Writes[FigoUserAdress] = (
     (JsPath \ "country").writeNullable[String] and
       (JsPath \ "city").writeNullable[String] and
@@ -75,16 +90,16 @@ class EventHandler {
       (JsPath \ "password").readNullable[String]
     ) (FigoUser.apply _)
 
-  implicit lazy val paymentTypeReads: Reads[FigoPaymentType] =  (
+  implicit lazy val paymentTypeReads: Reads[FigoPaymentType] = (
     (JsPath \ "allowed_recipients").read[Set[String]] and
       (JsPath \ "max_purpose_length").read[Int] and
       (JsPath \ "supported_text_keys").read[Set[String]] and
       (JsPath \ "min_scheduled_date").read[Date] and
       (JsPath \ "max_scheduled_date").read[Date] and
-        (JsPath \ "supported_file_formats").read[Set[String]]
+      (JsPath \ "supported_file_formats").read[Set[String]]
     ) (FigoPaymentType.apply _)
 
-  implicit lazy val paymentTypeWrites: Writes[FigoPaymentType] =  (
+  implicit lazy val paymentTypeWrites: Writes[FigoPaymentType] = (
     (JsPath \ "allowed_recipients").write[Set[String]] and
       (JsPath \ "max_purpose_length").write[Int] and
       (JsPath \ "supported_text_keys").write[Set[String]] and
@@ -94,21 +109,21 @@ class EventHandler {
     ) (unlift(FigoPaymentType.unapply))
 
 
-  implicit lazy val accountBalanceReads: Reads[FigoAccountBalance] =  (
+  implicit lazy val accountBalanceReads: Reads[FigoAccountBalance] = (
     (JsPath \ "balance").read[BigDecimal] and
       (JsPath \ "balance_date").read[Date] and
       (JsPath \ "credit_line").read[BigDecimal] and
       (JsPath \ "monthly_spending_limit").read[BigDecimal]
     ) (FigoAccountBalance.apply _)
 
-  implicit lazy val accountBalanceWrites: Writes[FigoAccountBalance] =  (
+  implicit lazy val accountBalanceWrites: Writes[FigoAccountBalance] = (
     (JsPath \ "balance").write[BigDecimal] and
       (JsPath \ "balance_date").write[Date] and
       (JsPath \ "credit_line").write[BigDecimal] and
       (JsPath \ "monthly_spending_limit").write[BigDecimal]
     ) (unlift(FigoAccountBalance.unapply))
 
-  implicit lazy val accountFigoReads: Reads[FigoAccount] =  (
+  implicit lazy val accountFigoReads: Reads[FigoAccount] = (
     (JsPath \ "account_id").read[String] and
       (JsPath \ "bank_id").read[String] and
       (JsPath \ "name").read[String] and
@@ -128,7 +143,7 @@ class EventHandler {
     ) (FigoAccount.apply _)
 
 
-  implicit lazy val accountFigoWrites: Writes[FigoAccount] =  (
+  implicit lazy val accountFigoWrites: Writes[FigoAccount] = (
     (JsPath \ "account_id").write[String] and
       (JsPath \ "bank_id").write[String] and
       (JsPath \ "name").write[String] and
@@ -358,6 +373,31 @@ class EventHandler {
               sendGeneralError(event, "Error while fetching account data")
             }
             case t => sendGeneralError(event, "Error while fetching account data")
+          }
+        }
+
+        case "linkBank" => {
+          val f: Future[FigoLinkBank] = Future {
+            Logger.info("updateUser params {}", event.params)
+            val link: FigoLinkBank = event.params.as[FigoLinkBank]
+            Logger.info("updateUser user {}", link)
+            FigoApi.linkAccount(link)
+          }
+          f onSuccess {
+            case data => {
+              Logger.info("link account {}", Json.toJson(data))
+              event.out.get ! Json.obj(
+                "name" -> event.name,
+                "id" -> event.id,
+                "data" -> Json.toJson(data)
+              )
+            }
+          }
+          f onFailure {
+            case m => {
+              Logger.info("Error on linking account {} {}", m.getMessage(), m.getStackTrace().toString())
+              sendGeneralError(event, "while linking bank account")
+            }
           }
         }
       }
