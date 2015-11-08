@@ -112,6 +112,8 @@ class EventHandler {
     )
   }
 
+
+
   /**
     * Trigger event by name
     * @param name
@@ -124,6 +126,18 @@ class EventHandler {
     })
   }
 
+
+  /**
+    * Brodcast event only for current user
+    * @param name
+    */
+  def broadcastWithSession(name: String, session_id: String): Unit = {
+    events.filter(item => item.session_id == session_id).foreach(item => {
+      if (item.name.equals(name)) {
+        handle(item)
+      }
+    })
+  }
 
   /**
     * Handle event
@@ -203,30 +217,14 @@ class EventHandler {
         }
 
         case "updateUser" => {
-          val f: Future[TokenResponse] = Future {
+          val f: Future[FigoUser] = Future {
             Logger.info("updateUser params {}", event.params)
             val user: FigoUser = event.params.as[FigoUser]
             Logger.info("updateUser user {}", user)
-            FigoApi.createUserAndLogin(user)
+            FigoApi.updateUser(user)
           }
           f onSuccess {
-            case v: TokenResponse => {
-              Logger.info("TokenResponse updateUser {}", Json.obj(
-                "token" -> v.getAccessToken(),
-                "expires" -> v.getExpiresIn().toString(),
-                "refresh" -> v.getRefreshToken()
-              ))
-              event.out.get ! Json.obj(
-                "name" -> event.name,
-                "id" -> event.id,
-                "data" -> Json.obj(
-                  "token" -> v.getAccessToken(),
-                  "expires" -> v.getExpiresIn().toString(),
-                  "refresh" -> v.getRefreshToken()
-                )
-              )
-            }
-
+            case u: FigoUser => broadcastWithSession("getUser", event.session_id)
           }
           f onFailure {
             case m: FigoException => {
@@ -247,7 +245,7 @@ class EventHandler {
           }
           f onSuccess {
             case user => {
-              Logger.info("TokenResponse getUser {}", Json.toJson(user))
+              Logger.info("User update getUser {}", Json.toJson(user))
               event.out.get ! Json.obj(
                 "name" -> event.name,
                 "id" -> event.id,

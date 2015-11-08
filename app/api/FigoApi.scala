@@ -1,6 +1,7 @@
 package api
 
 import java.net.{HttpURLConnection, URL}
+import java.util
 import java.util.HashMap
 
 import me.figo.FigoConnection
@@ -15,10 +16,11 @@ case class FigoUserAdress(
                            var city: Option[String],
                            var street: Option[String],
                            var vat: Option[String],
-                           var bill: Option[String],
+                           var bill: Option[String] = Some("false"),
                            var company: Option[String],
                            var street2: Option[String]
                          )
+
 case class FigoUser(
                      var access_token: Option[String],
                      var name: Option[String],
@@ -29,8 +31,24 @@ case class FigoUser(
                    )
 
 class MyFigoSession(token: String) extends FigoSession(token) {
-  def getUser(figoUser: FigoUser): FigoUser = {
-    val user: User = this.queryApi[User]("/rest/user", null, "GET", classOf[User])
+  def mapUser(user: User, figoUser: FigoUser) : User = {
+    val userToUpdate = new User()
+    var address: HashMap[String, String] = new util.HashMap[String, String]()
+    userToUpdate.setName(figoUser.name.getOrElse(null))
+    val figoAddress = figoUser.address.getOrElse(null)
+    if (!figoUser.address.isEmpty) {
+      address.put("country", figoAddress.country.getOrElse(null))
+      address.put("city", figoAddress.city.getOrElse(null))
+      address.put("street", figoAddress.street.getOrElse(null))
+      address.put("vat", figoAddress.vat.getOrElse(null))
+      address.put("bill", figoAddress.bill.getOrElse("false"))
+      address.put("company", figoAddress.company.getOrElse(null))
+      address.put("street2", figoAddress.street2.getOrElse(null))
+      userToUpdate.setAddress(address)
+    }
+    userToUpdate
+  }
+  def mapFigoUser(user: User, figoUser: FigoUser) : FigoUser =  {
     var list: HashMap[String, String] = user.getAddress()
     var userAddres: FigoUserAdress = new FigoUserAdress(
       Some(list.get("country")),
@@ -46,6 +64,15 @@ class MyFigoSession(token: String) extends FigoSession(token) {
     figoUser.address = Some(userAddres)
     Logger.info("User {}", figoUser)
     figoUser
+  }
+  def getUser(figoUser: FigoUser): FigoUser = {
+    val user: User = this.queryApi[User]("/rest/user", null, "GET", classOf[User])
+    mapFigoUser(user, figoUser)
+  }
+
+  def updateUser(figoUser: FigoUser): FigoUser = {
+    val user: User = this.queryApi[User]("/rest/user", mapUser(new User, figoUser), "PUT", classOf[User])
+    mapFigoUser(user, figoUser)
   }
 }
 
@@ -83,9 +110,9 @@ object FigoApi {
   )
 
 
-  //def getAccounts(user: FigoUser) = connection.session(user).getAccounts()
+  // def getAccounts(user: FigoUser) = connection.session(user.access_token.getOrElse(null).getAccounts()
   def getUser(user: FigoUser) = connection.session(user.access_token.getOrElse(null)).getUser(user)
 
-  //def updateUser(user: FigoUser) = connection.session(user)
+  def updateUser(user: FigoUser) = connection.session(user.access_token.getOrElse(null)).updateUser(user)
 
 }
